@@ -21,6 +21,8 @@
 #include <net/if.h>
 #include <ifaddrs.h>
 #include <netdb.h>
+#import "PTChannel.h"
+#import "InjectionClient.h"
 
 #if 0
 #define SLog NSLog
@@ -39,6 +41,17 @@ typedef union {
     struct sockaddr_in ip4;
     struct sockaddr addr;
 } sockaddr_union;
+
+@interface SimpleSocket (PT) <PTChannelDelegate>
+- (BOOL)connectViaPeerTalk;
+@end
+
+@interface SimpleSocket ()
+
+@property (nonatomic, weak) PTChannel *serverChannel;
+@property (nonatomic, weak) PTChannel *peerChannel;
+@property (nonatomic) dispatch_semaphore_t firstConnectSemaphore;
+@end
 
 @implementation SimpleSocket
 
@@ -107,6 +120,12 @@ typedef union {
 }
 
 + (instancetype)connectTo:(NSString *)address {
+    if ([address hasPrefix:@"peertalk"]) {
+        SimpleSocket *socket = [[self alloc] initWithPeertalk];
+        BOOL success = [socket connectViaPeerTalk];
+        return success ? socket : nil;
+    }
+    
     sockaddr_union serverAddr;
     [self parseV4Address:address into:&serverAddr.any];
 
@@ -176,6 +195,20 @@ typedef union {
 - (instancetype)initSocket:(int)socket {
     if ((self = [super init])) {
         clientSocket = socket;
+    }
+    return self;
+}
+
+- (instancetype)initWithPeertalk {
+    if (self = [super init]) {
+        _firstConnectSemaphore = dispatch_semaphore_create(0);
+        PTChannel *channel = [PTChannel channelWithDelegate:self];
+        [channel listenOnPort:PTProtocolIPv4PortNumber IPv4Address:INADDR_LOOPBACK callback:^(NSError *error) {
+            if (error) {
+            } else {
+                self.serverChannel = channel;
+            }
+        }];
     }
     return self;
 }
@@ -436,5 +469,32 @@ struct multicast_socket_packet {
     return [NSString stringWithUTF8String:ipaddr];
 }
 
+@end
+
+@implementation SimpleSocket (PT)
+
+- (BOOL)connectViaPeerTalk {
+    NSAssert(![NSThread isMainThread], @"should not call in main thread, peertalk will dispatch msg on main thread");
+    int result = dispatch_semaphore_wait(_firstConnectSemaphore, DISPATCH_TIME_FOREVER);
+    return result;
+}
+
+- (void)ioFrameChannel:(PTChannel*)channel didAcceptConnection:(PTChannel*)otherChannel fromAddress:(PTAddress*)address {
+    // Cancel any other connection. We are FIFO, so the last connection
+    // established will cancel any previous connection and "take its place".
+    if (self.peerChannel) {
+        [self.peerChannel cancel];
+    }
+    
+    self.peerChannel = otherChannel;
+    self.peerChannel.userInfo = address;
+    NSLog(@"[peertalk] Connected to %@", address);
+    
+    dispatch_semaphore_signal(self.firstConnectSemaphore);
+}
+
+- (void)ioFrameChannel:(PTChannel *)channel didReceiveFrameOfType:(uint32_t)type tag:(uint32_t)tag payload:(nullable NSData *)payload {
+    
+}
 @end
 #endif

@@ -104,6 +104,7 @@ extern "C" {
         [clientClass backgroundConnect:envHost];
     #ifdef DEVELOPER_HOST
     [clientClass backgroundConnect:DEVELOPER_HOST];
+    [clientClass backgroundConnect:"peertalk:"];
     if (!isdigit(DEVELOPER_HOST[0]) && !envHost)
         printf(APP_PREFIX"Sending broadcast packet to connect to your development host %s.\n"
                APP_PREFIX"If this fails, hardcode your Mac's IP address in HotReloading/Package.swift\n"
